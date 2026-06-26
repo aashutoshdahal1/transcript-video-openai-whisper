@@ -1,0 +1,4 @@
+fastapi
+uvicorn
+python-multipart
+# whisper is assumed to be installed in the environment (or we can use the local package)

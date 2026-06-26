@@ -51,5 +51,14 @@ fi
 echo "✅ Everything is running! Press Ctrl+C in this terminal to stop the servers."
 
 # Trap Ctrl+C to cleanly kill the background processes
-trap "echo 'Stopping servers...'; kill $BACKEND_PID $FRONTEND_PID; exit" INT TERM
+cleanup() {
+    echo "Stopping servers..."
+    kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
+    # Fallback: force kill any processes still listening on the frontend and backend ports
+    lsof -ti:8000 | xargs kill -9 2>/dev/null
+    lsof -ti:3000 | xargs kill -9 2>/dev/null
+    exit 0
+}
+
+trap cleanup INT TERM
 wait

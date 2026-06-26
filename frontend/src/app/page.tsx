@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import './globals.css';
 
 export default function Home() {
@@ -8,6 +8,9 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [transcription, setTranscription] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState("base");
+  const [ignoreMilliseconds, setIgnoreMilliseconds] = useState(false);
+  const [removeTimestamps, setRemoveTimestamps] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -49,6 +52,7 @@ export default function Home() {
     
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('model_name', selectedModel);
 
     try {
       const response = await fetch('http://localhost:8000/api/transcribe', {
@@ -113,9 +117,22 @@ export default function Home() {
     }
   };
 
+  const displayedTranscription = useMemo(() => {
+    if (!transcription) return transcription;
+    let result = transcription;
+    
+    if (removeTimestamps) {
+      result = result.replace(/\[\d{2,}:\d{2}(?::\d{2})?\.\d{3} --> \d{2,}:\d{2}(?::\d{2})?\.\d{3}\]\s*/g, "");
+    } else if (ignoreMilliseconds) {
+      result = result.replace(/(\[\d{2,}:\d{2}(?::\d{2})?)\.\d{3}( --> \d{2,}:\d{2}(?::\d{2})?)\.\d{3}(\])/g, "$1$2$3");
+    }
+    
+    return result;
+  }, [transcription, ignoreMilliseconds, removeTimestamps]);
+
   const handleCopy = () => {
-    if (transcription) {
-      navigator.clipboard.writeText(transcription);
+    if (displayedTranscription) {
+      navigator.clipboard.writeText(displayedTranscription);
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);
     }
@@ -156,6 +173,42 @@ export default function Home() {
           />
         </div>
 
+        <div className="model-select-group">
+          <label>Model Selection</label>
+          <select 
+            value={selectedModel} 
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="model-select"
+            disabled={isLoading}
+          >
+            <option value="tiny">Tiny (Fastest, least accurate)</option>
+            <option value="base">Base (Fast, good enough)</option>
+            <option value="small">Small (Slower, better)</option>
+            <option value="medium">Medium (Slow, very accurate)</option>
+            <option value="large">Large (Slowest, most accurate)</option>
+          </select>
+        </div>
+
+        <div className="options-group">
+          <label className="checkbox-label">
+            <input 
+              type="checkbox" 
+              checked={ignoreMilliseconds} 
+              onChange={(e) => setIgnoreMilliseconds(e.target.checked)}
+              disabled={removeTimestamps}
+            />
+            Ignore milliseconds
+          </label>
+          <label className="checkbox-label">
+            <input 
+              type="checkbox" 
+              checked={removeTimestamps} 
+              onChange={(e) => setRemoveTimestamps(e.target.checked)}
+            />
+            Remove timestamps (Timeline)
+          </label>
+        </div>
+
         <button 
           className="btn-primary" 
           onClick={handleTranscribe} 
@@ -177,7 +230,7 @@ export default function Home() {
           </div>
         )}
 
-        {transcription !== null && (
+        {displayedTranscription !== null && (
           <div className="result-box">
             <div className="result-header">
               <h3>Transcription</h3>
@@ -195,7 +248,7 @@ export default function Home() {
                 )}
               </button>
             </div>
-            <div className="result-text">{transcription || "Listening..."}</div>
+            <div className="result-text">{displayedTranscription || "Listening..."}</div>
           </div>
         )}
       </div>

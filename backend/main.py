@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import shutil
@@ -20,13 +20,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print("Loading Whisper model 'base'...")
-model = whisper.load_model("base")
+current_model_name = "base"
+print(f"Loading Whisper model '{current_model_name}'...")
+model = whisper.load_model(current_model_name)
 print("Model loaded successfully.")
+model_lock = threading.Lock()
+
+import uuid
 
 @app.post("/api/transcribe")
-async def transcribe(file: UploadFile = File(...)):
-    temp_file_path = f"temp_{file.filename}"
+async def transcribe(file: UploadFile = File(...), model_name: str = Form("base")):
+    global model, current_model_name
+
+    with model_lock:
+        if model_name != current_model_name:
+            print(f"Switching Whisper model to '{model_name}'...")
+            model = whisper.load_model(model_name)
+            current_model_name = model_name
+            print(f"Model '{model_name}' loaded successfully.")
+            
+        # Capture the model instance for the thread
+        model_instance = model
+            
+    unique_id = uuid.uuid4().hex
+    temp_file_path = f"temp_{unique_id}_{file.filename}"
     
     with open(temp_file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -40,7 +57,7 @@ async def transcribe(file: UploadFile = File(...)):
         
     def run_transcription():
         try:
-            model.transcribe(temp_file_path, callback=whisper_callback, verbose=False)
+            model_instance.transcribe(temp_file_path, callback=whisper_callback, verbose=False)
         except Exception as e:
             asyncio.run_coroutine_threadsafe(queue.put({"error": str(e)}), loop)
         finally:

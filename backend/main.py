@@ -51,13 +51,11 @@ async def transcribe(file: UploadFile = File(...), model_name: str = Form("base"
     loop = asyncio.get_running_loop()
     queue = asyncio.Queue()
     
-    def whisper_callback(segment):
-        # Safely put the segment into the async queue from the background thread
-        asyncio.run_coroutine_threadsafe(queue.put(segment), loop)
-        
     def run_transcription():
         try:
-            model_instance.transcribe(temp_file_path, callback=whisper_callback, verbose=False)
+            result = model_instance.transcribe(temp_file_path, verbose=False)
+            for segment in result.get("segments", []):
+                asyncio.run_coroutine_threadsafe(queue.put(segment), loop)
         except Exception as e:
             asyncio.run_coroutine_threadsafe(queue.put({"error": str(e)}), loop)
         finally:

@@ -3,10 +3,13 @@
 import React, { useState, useRef, useMemo } from 'react';
 import './globals.css';
 
+const STAGES = ['Uploading…', 'Detecting language…', 'Transcribing audio…', 'Finalizing…'];
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [stage, setStage] = useState(0);
   const [transcription, setTranscription] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState("base");
   const [ignoreMilliseconds, setIgnoreMilliseconds] = useState(false);
@@ -16,117 +19,78 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = () => setIsDragging(false);
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setFile(e.dataTransfer.files[0]);
-      setError(null);
-      setTranscription(null);
-    }
+    e.preventDefault(); setIsDragging(false);
+    if (e.dataTransfer.files?.length) { setFile(e.dataTransfer.files[0]); setError(null); setTranscription(null); }
   };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
-      setError(null);
-      setTranscription(null);
-    }
+    if (e.target.files?.length) { setFile(e.target.files[0]); setError(null); setTranscription(null); }
   };
 
   const handleTranscribe = async () => {
     if (!file) return;
-
     setIsLoading(true);
+    setStage(0);
     setError(null);
-    setTranscription(""); // Start empty for streaming
-    
+    setTranscription("");
+
     const formData = new FormData();
     formData.append('file', file);
     formData.append('model_name', selectedModel);
 
     try {
-      const response = await fetch('http://localhost:8000/api/transcribe', {
-        method: 'POST',
-        body: formData,
-      });
+      setStage(1);
+      const response = await fetch('http://localhost:8000/api/transcribe', { method: 'POST', body: formData });
+      if (!response.ok) throw new Error('Transcription failed. Please ensure the backend is running.');
+      if (!response.body) throw new Error('No response body from server.');
 
-      if (!response.ok) {
-        throw new Error('Transcription failed. Please ensure the backend is running.');
-      }
-
-      if (!response.body) {
-        throw new Error('No response body from server.');
-      }
-
+      setStage(2);
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
-      
-      let isStreamComplete = false;
-      while (!isStreamComplete) {
-        const { value, done } = await reader.read();
-        
+      let done = false;
+      let hasFirstSegment = false;
+
+      while (!done) {
+        const { value, done: streamDone } = await reader.read();
         if (value) {
           const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n\n');
-          
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const dataStr = line.slice(6).trim();
-              if (dataStr === '[DONE]') {
-                isStreamComplete = true;
-                break;
-              }
-              
-              if (dataStr) {
-                try {
-                  const parsed = JSON.parse(dataStr);
-                  if (parsed.error) {
-                    setError(parsed.error);
-                    isStreamComplete = true;
-                    break;
-                  }
-                  if (parsed.text) {
-                    setTranscription((prev) => (prev ? prev + parsed.text : parsed.text));
-                  }
-                } catch (e) {
-                  console.error('Error parsing SSE chunk:', e);
+          for (const line of chunk.split('\n\n')) {
+            if (!line.startsWith('data: ')) continue;
+            const dataStr = line.slice(6).trim();
+            if (dataStr === '[DONE]') { done = true; break; }
+            if (dataStr) {
+              try {
+                const parsed = JSON.parse(dataStr);
+                if (parsed.error) { setError(parsed.error); done = true; break; }
+                if (parsed.text) {
+                  if (!hasFirstSegment) { hasFirstSegment = true; }
+                  setTranscription(prev => (prev ? prev + parsed.text : parsed.text));
                 }
-              }
+              } catch {}
             }
           }
         }
-        
-        if (done) {
-          isStreamComplete = true;
-        }
+        if (streamDone) done = true;
       }
+      setStage(3);
     } catch (err: any) {
       setError(err.message || 'An error occurred during transcription.');
     } finally {
       setIsLoading(false);
+      setStage(0);
     }
   };
 
   const displayedTranscription = useMemo(() => {
     if (!transcription) return transcription;
     let result = transcription;
-    
     if (removeTimestamps) {
       result = result.replace(/\[\d{2,}:\d{2}(?::\d{2})?\.\d{3} --> \d{2,}:\d{2}(?::\d{2})?\.\d{3}\]\s*/g, "");
     } else if (ignoreMilliseconds) {
       result = result.replace(/(\[\d{2,}:\d{2}(?::\d{2})?)\.\d{3}( --> \d{2,}:\d{2}(?::\d{2})?)\.\d{3}(\])/g, "$1$2$3");
     }
-    
     return result;
   }, [transcription, ignoreMilliseconds, removeTimestamps]);
 
@@ -146,7 +110,7 @@ export default function Home() {
           <p>Transform your audio into text instantly.</p>
         </div>
 
-        <div 
+        <div
           className={`upload-area ${isDragging ? 'drag-active' : ''}`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -160,27 +124,13 @@ export default function Home() {
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
           </div>
-          <p>
-            {file ? <strong>{file.name}</strong> : 'Drag & drop an audio file here, or click to select'}
-          </p>
-          <input 
-            type="file" 
-            className="file-input" 
-            ref={fileInputRef} 
-            onChange={handleFileChange}
-            accept="audio/*"
-            style={{ display: 'none' }}
-          />
+          <p>{file ? <strong>{file.name}</strong> : 'Drag & drop an audio file here, or click to select'}</p>
+          <input type="file" className="file-input" ref={fileInputRef} onChange={handleFileChange} accept="audio/*" style={{ display: 'none' }} />
         </div>
 
         <div className="model-select-group">
           <label>Model Selection</label>
-          <select 
-            value={selectedModel} 
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="model-select"
-            disabled={isLoading}
-          >
+          <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)} className="model-select" disabled={isLoading}>
             <option value="tiny">Tiny (Fastest, least accurate)</option>
             <option value="base">Base (Fast, good enough)</option>
             <option value="small">Small (Slower, better)</option>
@@ -191,44 +141,22 @@ export default function Home() {
 
         <div className="options-group">
           <label className="checkbox-label">
-            <input 
-              type="checkbox" 
-              checked={ignoreMilliseconds} 
-              onChange={(e) => setIgnoreMilliseconds(e.target.checked)}
-              disabled={removeTimestamps}
-            />
+            <input type="checkbox" checked={ignoreMilliseconds} onChange={e => setIgnoreMilliseconds(e.target.checked)} disabled={removeTimestamps} />
             Ignore milliseconds
           </label>
           <label className="checkbox-label">
-            <input 
-              type="checkbox" 
-              checked={removeTimestamps} 
-              onChange={(e) => setRemoveTimestamps(e.target.checked)}
-            />
+            <input type="checkbox" checked={removeTimestamps} onChange={e => setRemoveTimestamps(e.target.checked)} />
             Remove timestamps (Timeline)
           </label>
         </div>
 
-        <button 
-          className="btn-primary" 
-          onClick={handleTranscribe} 
-          disabled={!file || isLoading}
-        >
+        <button className="btn-primary" onClick={handleTranscribe} disabled={!file || isLoading}>
           {isLoading ? (
-            <>
-              <div className="spinner"></div>
-              Transcribing... (Streaming live!)
-            </>
-          ) : (
-            'Transcribe Audio'
-          )}
+            <><div className="spinner"></div>Transcribing…</>
+          ) : 'Transcribe Audio'}
         </button>
 
-        {error && (
-          <div className="error-text">
-            {error}
-          </div>
-        )}
+        {error && <div className="error-text">{error}</div>}
 
         {displayedTranscription !== null && (
           <div className="result-box">
@@ -236,22 +164,36 @@ export default function Home() {
               <h3>Transcription</h3>
               <button className="copy-btn" onClick={handleCopy} title="Copy to clipboard">
                 {isCopied ? (
-                  <>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                    Copied!
-                  </>
+                  <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Copied!</>
                 ) : (
-                  <>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                    Copy
-                  </>
+                  <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>Copy</>
                 )}
               </button>
             </div>
-            <div className="result-text">{displayedTranscription || "Listening..."}</div>
+            <div className="result-text">{displayedTranscription || "Listening…"}</div>
           </div>
         )}
       </div>
+
+      {/* ── Loading overlay ── */}
+      {isLoading && (
+        <div className="loading-overlay">
+          <div className="loading-card">
+            <div className="waveform">
+              {[...Array(12)].map((_, i) => (
+                <div key={i} className="waveform-bar" style={{ animationDelay: `${i * 0.08}s` }} />
+              ))}
+            </div>
+            <p className="loading-stage">{STAGES[stage]}</p>
+            <div className="stage-dots">
+              {STAGES.map((_, i) => (
+                <div key={i} className={`stage-dot ${i === stage ? 'active' : i < stage ? 'done' : ''}`} />
+              ))}
+            </div>
+            {file && <p className="loading-filename">{file.name}</p>}
+          </div>
+        </div>
+      )}
     </main>
   );
 }

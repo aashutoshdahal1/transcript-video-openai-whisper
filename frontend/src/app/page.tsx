@@ -42,7 +42,7 @@ export default function Home() {
 
     try {
       setStage(1);
-      const response = await fetch('http://localhost:8000/api/transcribe', { method: 'POST', body: formData });
+      const response = await fetch('/api/transcribe', { method: 'POST', body: formData });
       if (!response.ok) throw new Error('Transcription failed. Please ensure the backend is running.');
       if (!response.body) throw new Error('No response body from server.');
 

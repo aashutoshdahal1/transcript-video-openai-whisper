@@ -1,15 +1,9 @@
 import type { NextConfig } from "next";
 
-const backendPort = process.env.DEVHUB_BACKEND_PORT || process.env.BACKEND_PORT || "8001";
-
 const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: `http://localhost:${backendPort}/api/:path*`,
-      },
-    ];
+  // Allow up to 500MB uploads through the Next.js middleware layer
+  experimental: {
+    middlewareClientMaxBodySize: 500 * 1024 * 1024,
   },
 };
 
